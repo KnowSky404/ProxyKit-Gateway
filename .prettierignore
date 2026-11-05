@@ -1,0 +1,5 @@
+bun.lock
+worker-configuration.d.ts
+LICENSE
+node_modules/
+.wrangler/

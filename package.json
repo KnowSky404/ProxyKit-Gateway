@@ -1,0 +1,26 @@
+{
+  "name": "proxykit-gateway",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "bun@1.4.4",
+  "scripts": {
+    "dev": "wrangler dev --local",
+    "types": "wrangler types --strict-vars=false",
+    "typecheck": "tsc --noEmit && tsc --project tsconfig.scripts.json",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run && bun test ./scripts",
+    "build": "wrangler deploy --dry-run --outdir .wrangler/build",
+    "check": "bun run format:check && bun run typecheck && bun run test && bun run build",
+    "device:new": "bun scripts/device-token.ts"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "1.5.1",
+    "@types/bun": "1.4.4",
+    "prettier": "3.9.10",
+    "typescript": "7.0.2",
+    "vitest": "5.1.0",
+    "wrangler": "4.157.0"
+  }
+}
