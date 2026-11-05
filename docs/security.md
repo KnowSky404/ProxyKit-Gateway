@@ -25,7 +25,7 @@ enabled=false或移除摘要使设备401；disabled_paths在已认证且已授�
 
 URL Token默认禁用，仅作Loon/QX待验收的兼容方案，必须与Bearer使用不同设备Token。URL会进入客户端备份/同步、截图、历史、反向代理、运营商或平台元数据记录；TLS不消除这些端点风险。泄漏后撤销对应设备摘要、生成新的URL专用Token并替换订阅。不要将URL Token放在公开Issue、分享配置或分析服务中。
 
-Worker仅记录固定错误类别、状态与随机requestId；不记录原始异常、URL/query、Header、设备信息、正文或GitHub响应。wrangler显式redact_query_string=true、invocation_logs=false、traces=false（为满足URL凭据边界，优先于通用trace默认值）；保留脱敏应用错误日志。不启用Logpush、Tail或第三方追踪。平台网络层、客户端和Wrangler本地请求日志不受应用日志代码控制，部署前审计整条链路；实际隐私验证未覆盖Cloudflare生产。参考[观测配置](https://developers.cloudflare.com/workers/wrangler/configuration/#observability)。
+Worker仅记录固定错误类别、状态与随机requestId；不记录原始异常、URL/query、Header、设备信息、正文或GitHub响应。cloudflare.config.ts显式redactQueryString=true、invocationLogs=false、traces.enabled=false（为满足URL凭据边界，优先于通用trace默认值）；保留脱敏应用错误日志。不启用Logpush、Tail或第三方追踪。平台网络层、客户端和本地开发服务器请求日志不受应用日志代码控制，部署前审计整条链路；实际隐私验证未覆盖Cloudflare生产。参考[观测配置](https://developers.cloudflare.com/workers/wrangler/configuration/#observability)。
 
 私人资源在入口强制HTTPS（HTTP返回400且不读取上游）；health可通过HTTP用于本地检查。响应永远private,no-store，Cloudflare Cache API不保存私有响应。每次304或内存命中都重新鉴权。部署域名必须配置绕过Cache Rules/CDN共享缓存，不得用Cache Everything覆盖响应，也不得在Worker前加绕过鉴权的缓存。不要记录带Cookie/Token/完整URL的缓存键；当前缓存仅使用不可变dist SHA。
 

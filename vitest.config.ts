@@ -7,7 +7,7 @@ export default defineConfig({
     cloudflareTest(async () => {
       const origin = upstream(await fixture());
       return {
-        wrangler: { configPath: './wrangler.jsonc' },
+        config: './cloudflare.config.ts',
         miniflare: {
           bindings: { ...(await authEnv()) },
           // Mock at the network boundary so workerd validates the real fetch call and options.
