@@ -1,0 +1,3 @@
+# PLACEHOLDERS ONLY. Replace locally; never commit .dev.vars.
+GITHUB_READ_TOKEN="REPLACE_WITH_PRIVATE_REPO_CONTENTS_READ_TOKEN"
+DEVICE_AUTH='{"devices":[],"disabled_paths":[]}'

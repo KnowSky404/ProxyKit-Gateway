@@ -1,0 +1,2 @@
+# Preserve Wrangler output verbatim, including upstream whitespace.
+worker-configuration.d.ts linguist-generated=true -whitespace
