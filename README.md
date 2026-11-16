@@ -1,10 +1,10 @@
 # ProxyKit-Gateway
 
-基于 Cloudflare Workers 的私人规则分发网关。向个人 Loon、Quantumult X、sing-box 设备提供独立鉴权、固定仓库或精确路径授权和经过完整性验证的不可变规则快照。
+基于 Cloudflare Workers 的私人规则分发网关。向个人 Loon、Quantumult X、sing-box 设备提供独立鉴权、固定仓库或精确路径授权和绑定不可变版本、逐文件校验的规则下载。
 
 ```text
 ProxyKit-Private / dist → 固定 GitHub REST API → Worker → 已授权设备
-                            ↑ 全量校验 SHA-256
+                            ↑ 仅校验所请求文件 SHA-256
 ```
 
 [ProxyKit](https://github.com/KnowSky404/ProxyKit) 维护公共规则及生成器；ProxyKit-Private 保存私人源、构建并发布四类产物。本仓库只负责读取与分发。公共规则继续直连 ProxyKit。保留原有 AGPL LICENSE。
@@ -16,7 +16,7 @@ src/
   index.ts           Worker 入口
   app.ts             HTTP 路由与条件请求
   auth/devices.ts    摘要认证、设备授权与停用
-  providers/github.ts ArtifactProvider / GitHub 快照读取与有界内存缓存
+  providers/github.ts ArtifactProvider / GitHub 按需文件读取与有界内存缓存
   manifest/          严格 JSON / Schema / 摘要校验
   config/contract.ts 固定路径和资源上限
   http/errors.ts     脱敏错误、安全响应头
@@ -61,8 +61,8 @@ curl --fail --header 'Authorization: Bearer DEVICE_TOKEN_PLACEHOLDER' \
 
 新设备默认使用 `paths: ["*"]` 授权固定私人仓库内全部当前及未来发布的规则；原有精确路径授权保持不变。规则发布到 `dist` 后自动生效，新增规则只需替换订阅路径，删除后对应地址返回 404，无需重新部署或更新授权。支持 GET/HEAD、鉴权后的 ETag/304。所有私人响应 `private, no-store`。完整列表见 [API](docs/api.md)，客户端配置见 [客户端示例](docs/client-examples.md)。
 
-V1 安全上限：每文件/manifest ≤1,000,000 字节；最多 8 个规则集合、总产物 ≤8,000,000 字节；一次冷加载最多 35 次 GitHub 请求，每次 3 秒、整批 15 秒，不重试。目标为 Workers Free，不配置付费 CPU 上限；免费额度与生产负载须实测，不能通过跳过校验规避超限。超限/损坏/不兼容/上游失败都返回 503，绝不跳过完整校验。每次授权后重新解析 dist；缓存不提供陈旧回退。
+每次订阅只下载目标文件，不下载其他规则或格式。冷读取固定 4 次 GitHub 调用（dist ref、Git tree、Manifest、目标文件）；同版本换文件需 2 次，同文件命中缓存只查 ref 1 次。请求数不随规则组数增长。取消网关额外的 8 组/总产物 8 MB 限制，遵循发布者最多 1000 组的 Schema v1；每文件/Manifest ≤1,000,000 字节，树元数据最多 4064 条目，API JSON ≤2,100,000 字节。缓存保留版本元数据和最近一个验证后的文件，文件字节最多 1 MB。每个上游请求 3 秒、单次文件读取总计 15 秒，不重试。目标为 Workers Free，生产 CPU/并发容量仍须实测。每次授权后重新解析 dist，不使用旧版本回退；Manifest 无效、目标文件损坏、超限或上游失败返回 503，未发布或已删除的授权路径返回 404。
 
-已验证能力与证据见 [验证记录](docs/verification.md)：自动化测试覆盖全部四类响应、字节完整性、权限与上游故障；当前实现也使用现有 gh 身份对真实私人 GitHub API 完成只读快照验证。尚未部署 Cloudflare、未验证真实设备和中国大陆网络；不能将模拟响应测试解释为真机兼容性认证。
+已验证能力与证据见 [验证记录](docs/verification.md)：自动化测试覆盖全部四类响应、字节完整性、权限与上游故障；历史实现使用现有 gh 身份完成了真实私人 API 只读验证；当前版本的生产部署与 HTTP 验证以对应 PR 交付报告为准。未验证真实设备和中国大陆网络，不能将模拟响应测试解释为真机兼容性认证。
 
-后续优先：人工验收/受控部署、Loon/QX/sing-box 真机与大陆可达性验证、根据实测 API 配额和负载再决定是否升级发布契约或接入 R2。更多边界与取舍见 [架构](docs/architecture.md) 和 [安全](docs/security.md)。
+后续优先：Loon/QX/sing-box 真机与大陆可达性验证、根据实测 API 配额和负载再决定是否升级发布契约或接入 R2。更多边界与取舍见 [架构](docs/architecture.md) 和 [安全](docs/security.md)。

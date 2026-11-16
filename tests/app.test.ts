@@ -46,14 +46,17 @@ describe('HTTP and access control', () => {
     expect(await res.json()).toEqual({ status: 'ok' });
     expect(origin.calls).toHaveLength(0);
   });
-  it('requires a fully verified snapshot even with repository access', async () => {
+  it('does not fetch damaged unrequested bytes with repository access', async () => {
     const { app, env, data } = await setup();
     vi.spyOn(console, 'error').mockImplementation(() => {});
     const config = JSON.parse(env.DEVICE_AUTH);
     config.devices[0].paths = ['*'];
     env.DEVICE_AUTH = JSON.stringify(config);
     data.bytes.set('generated/sing-box/rules/example.srs', new Uint8Array([0]));
-    expect((await app(get(), env)).status).toBe(503);
+    expect((await app(get(), env)).status).toBe(200);
+    expect(
+      (await app(get('/v1/private/sing-box/example.srs'), env)).status,
+    ).toBe(503);
   });
   it.each([
     ['/v1/private/loon/example.list', 'text/plain; charset=utf-8'],
@@ -259,7 +262,7 @@ describe('HTTP and access control', () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
     const privateError = 'private-origin-response.example.com';
     const app = createApp({
-      snapshot: async () => {
+      artifact: async () => {
         throw new Error(privateError);
       },
     });
@@ -334,7 +337,10 @@ it.each([
 
 it('rejects a redirect at the native fetch boundary without following its Location', async () => {
   await expect(
-    new GitHubArtifactProvider().snapshot('redirect-test-placeholder'),
+    new GitHubArtifactProvider().artifact(
+      'generated/loon/rules/example.list',
+      'redirect-test-placeholder',
+    ),
   ).rejects.toMatchObject({
     status: 503,
     category: 'upstream_unavailable',

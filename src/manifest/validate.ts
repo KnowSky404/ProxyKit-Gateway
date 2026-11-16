@@ -4,7 +4,6 @@ import {
   DIGEST,
   MAX_FILE_BYTES,
   MAX_RULE_SETS,
-  MAX_SNAPSHOT_BYTES,
   NAME,
 } from '../config/contract';
 import { requireValue } from '../http/errors';
@@ -87,7 +86,6 @@ export function validateManifest(value: unknown): Manifest {
   }
   expected.sort();
   requireValue(Array.isArray(m.files) && m.files.length === expected.length);
-  let total = 0;
   const files = m.files.map((value, i) => {
     const f = fields(value, ['path', 'size', 'sha256']);
     requireValue(typeof f.path === 'string' && f.path === expected[i]);
@@ -98,10 +96,8 @@ export function validateManifest(value: unknown): Manifest {
         f.size <= MAX_FILE_BYTES,
     );
     requireValue(typeof f.sha256 === 'string' && DIGEST.test(f.sha256));
-    total += f.size;
     return { path: f.path, size: f.size, sha256: f.sha256 };
   });
-  requireValue(total <= MAX_SNAPSHOT_BYTES);
   return { sourceCommit: m.source_commit, files };
 }
 

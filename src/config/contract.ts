@@ -2,12 +2,11 @@ export const NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 export const COMMIT = /^[0-9a-f]{40}$/;
 export const DIGEST = /^[0-9a-f]{64}$/;
 export const MAX_FILE_BYTES = 1_000_000;
-export const MAX_RULE_SETS = 8;
-export const MAX_TREE_ENTRIES = 64;
-export const MAX_SNAPSHOT_BYTES = 8_000_000;
+export const MAX_RULE_SETS = 1000;
+export const MAX_TREE_ENTRIES = MAX_RULE_SETS * 4 + 64;
 export const MAX_UPSTREAM_JSON_BYTES = 2_100_000;
 export const UPSTREAM_TIMEOUT_MS = 3000;
-export const SNAPSHOT_TIMEOUT_MS = 15000;
+export const ARTIFACT_TIMEOUT_MS = 15000;
 
 export function artifactPaths(name: string): string[] {
   return [
