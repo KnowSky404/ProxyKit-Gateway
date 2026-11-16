@@ -10,6 +10,8 @@
 
 在私人终端把两个字符串字段组织到受保护的 JSON 文件，例如 `.cloudflare/private/runtime.json`，目录权限 700、文件权限 600。真实值不能出现在聊天、命令参数、公开 GitHub 记录、测试夹具或 Actions Artifact 中。避免会展开环境变量的 dotenv Secrets 文件。
 
+客户端集合接口复用现有授权和运行时Secrets，无需迁移：`/v1/private/loon`、`/v1/private/quantumultx`、`/v1/private/sing-box`支持现有Bearer或URL凭据。上线后核对各目录的资源计数/客户端范围、HEAD/304、未认证401，并从列表路径下载文件；具体名称和完整URL不得打印到公开日志。
+
 本次按需读取升级只需要发布代码，现有运行时 Secrets、设备 Token 和订阅地址可继续使用。冷读取固定4次上游调用；同版本换文件2次，同文件命中缓存1次，不再随规则组数增长。
 
 ## 设备授权

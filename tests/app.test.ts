@@ -261,11 +261,10 @@ describe('HTTP and access control', () => {
   it('does not expose URL tokens or arbitrary exception text in logs/errors', async () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
     const privateError = 'private-origin-response.example.com';
-    const app = createApp({
-      artifact: async () => {
-        throw new Error(privateError);
-      },
-    });
+    const fail = async () => {
+      throw new Error(privateError);
+    };
+    const app = createApp({ artifact: fail, catalog: fail });
     const env = await authEnv({ ALLOW_URL_TOKENS: 'true' });
     const res = await app(get(`${API_PATH}?key=${URL_TOKEN}`, null), env);
     const output = JSON.stringify(log.mock.calls) + (await res.text());

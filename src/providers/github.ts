@@ -9,7 +9,7 @@ import {
 import { GatewayError, requireValue } from '../http/errors';
 import { object, parseJson } from '../manifest/json';
 import { sha256, validateManifest } from '../manifest/validate';
-import type { Manifest } from '../manifest/validate';
+import type { Manifest, ManifestFile } from '../manifest/validate';
 
 export interface Artifact {
   path: string;
@@ -19,6 +19,9 @@ export interface Artifact {
 }
 export interface ArtifactProvider {
   artifact(path: string, token: string): Promise<Artifact | undefined>;
+  catalog(
+    token: string,
+  ): Promise<{ commit: string; files: readonly ManifestFile[] }>;
 }
 
 const API = 'https://api.github.com/repos/KnowSky404/ProxyKit-Private';
@@ -77,6 +80,37 @@ export class GitHubArtifactProvider implements ArtifactProvider {
   ) {}
 
   async artifact(path: string, token: string): Promise<Artifact | undefined> {
+    try {
+      const { cached, read } = await this.load(token);
+      const entry = cached.manifest.files.find((file) => file.path === path);
+      if (!entry) return;
+      if (cached.artifact?.path === path) return cached.artifact;
+      const bytes = await read(path);
+      requireValue(
+        bytes.byteLength === entry.size &&
+          (await sha256(bytes)) === entry.sha256,
+      );
+      const artifact = {
+        path,
+        commit: cached.commit,
+        bytes,
+        sha256: entry.sha256,
+      };
+      cached.artifact = artifact;
+      return artifact;
+    } catch (error) {
+      this.cached = undefined;
+      if (error instanceof GatewayError) throw error;
+      throw new GatewayError(503, 'artifact_rejected');
+    }
+  }
+
+  async catalog(token: string) {
+    const { cached } = await this.load(token);
+    return { commit: cached.commit, files: cached.manifest.files };
+  }
+
+  private async load(token: string) {
     if (
       typeof token !== 'string' ||
       !token.trim() ||
@@ -204,17 +238,7 @@ export class GitHubArtifactProvider implements ArtifactProvider {
         cached = { commit, manifest, tree };
         this.cached = cached;
       }
-      const entry = cached.manifest.files.find((file) => file.path === path);
-      if (!entry) return;
-      if (cached.artifact?.path === path) return cached.artifact;
-      const bytes = await read(path, cached.tree);
-      requireValue(
-        bytes.byteLength === entry.size &&
-          (await sha256(bytes)) === entry.sha256,
-      );
-      const artifact = { path, commit, bytes, sha256: entry.sha256 };
-      cached.artifact = artifact;
-      return artifact;
+      return { cached, read: (path: string) => read(path, cached.tree) };
     } catch (error) {
       this.cached = undefined;
       if (error instanceof GatewayError) throw error;

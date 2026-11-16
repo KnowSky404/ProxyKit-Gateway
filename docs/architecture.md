@@ -1,6 +1,6 @@
 # 架构与发布契约
 
-数据流固定为 Private dist → GitHub REST → Worker → 设备。ArtifactProvider 通过 `artifact(path, token)` 返回单个已验证产物（dist commit、路径、字节、摘要），未在当前 Manifest 发布的路径返回空值，由 HTTP 层返回 404。路径只能由固定客户端路由映射，并且必须出现在严格校验后的 Manifest；不会开放任意文件读取接口。GitHubArtifactProvider 的 fetch 可注入，使测试可精确模拟故障；auth、manifest 和 HTTP 模块可独立验证。未来若采用 R2，仅在同一接口后读取不可变完整快照，不预建数据库或存储适配器。
+数据流固定为 Private dist → GitHub REST → Worker → 设备。ArtifactProvider 通过 `artifact(path, token)` 返回单个已验证产物（dist commit、路径、字节、摘要），未在当前 Manifest 发布的路径返回空值，由 HTTP 层返回 404。路径只能由固定客户端路由映射，并且必须出现在严格校验后的 Manifest；不会开放任意文件读取接口。`catalog(token)`复用相同的固定版本元数据读取流程，仅返回已校验Manifest的资源声明，不预取产物正文。HTTP集合路由先认证并确认设备在对应客户端下有授权范围，再过滤客户端、精确路径和停用项后生成JSON；列表内容不存入共享缓存，避免跨设备泄露。GitHubArtifactProvider 的 fetch 可注入，使测试可精确模拟故障；auth、manifest 和 HTTP 模块可独立验证。未来若采用 R2，仅在同一接口后读取不可变完整快照，不预建数据库或存储适配器。
 
 审计依据：Private main `5400f92eb3b588ef7a213142db3a7ed39d16feda` 的 docs/publishing.md、docs/security.md、scripts/distribution.py、build-rules.yml；公共 ProxyKit main `10f07b382c201ec4776c420510c3031e68492194` 的 docs/private-integration.md。未修改这两个仓库或 dist。
 
@@ -14,7 +14,7 @@
 - 重复 JSON 键（包括转义等价键）、未知字段、路径、版本和缺件均拒绝。数值字段使用十进制整数JSON词法（拒绝1.0/1e0），解析深度 ≤32，严格 UTF-8；只读取固定提交树元数据作mode校验，不读取未列出文件正文、不跟随 download_url/重定向。
 - 每文件及 manifest ≤1,000,000 字节，Contents API 对象要求 type=file、相同 path、encoding=base64，先以同一dist SHA的Git tree确认manifest及所请求产物为普通blob（100644/100755，拒绝120000符号链接和160000子模块，即使Contents API解引用伪装为file）；同时拒绝Contents显式symlink/submodule标记；严格 Base64 解码并检查 API size、manifest size、SHA-256。SRS 保留 Uint8Array，从不做文本转换。
 
-按需读取流程：先鉴权与设备范围授权、精确路径停用检查（仓库范围只接受 `paths: ["*"]`，否则按精确路径列表授权） → GET 固定 `/git/ref/heads/dist` → 检查 commit SHA → 相同 SHA 可复用元数据，否则读取该 SHA 的 Git tree 和 Manifest → 严格校验 Schema、文件白名单、版本及元数据资源边界 → 查找所请求路径 → 未发布则返回 404，否则仅读取并校验目标文件 → 返回文件。首次冷读取固定 4 次 GitHub 调用；相同版本换文件需 2 次；同文件缓存命中只查 ref 1 次。缺失路径冷读取只需 3 次元数据调用，热读取只查 ref。读取期间 dist 更新不影响本次固定 SHA；下一请求重新解析 ref。source_commit 仍通过 Manifest 校验，但不作为缓存版本。
+按需读取流程：先鉴权与设备范围授权、精确路径停用检查（仓库范围只接受 `paths: ["*"]`，否则按精确路径列表授权） → GET 固定 `/git/ref/heads/dist` → 检查 commit SHA → 相同 SHA 可复用元数据，否则读取该 SHA 的 Git tree 和 Manifest → 严格校验 Schema、文件白名单、版本及元数据资源边界 → 查找所请求路径 → 未发布则返回 404，否则仅读取并校验目标文件 → 返回文件。首次冷读取固定 4 次 GitHub 调用；相同版本换文件需 2 次；同文件缓存命中只查 ref 1 次。缺失路径和目录列表的冷读取只需 3 次元数据调用，热读取只查 ref。列表不会替换最近一个文件的字节缓存。读取期间 dist 更新不影响本次固定 SHA；下一请求重新解析 ref。source_commit 仍通过 Manifest 校验，但不作为缓存版本。
 
 取消网关自设的 8 组/32 文件及总产物 8,000,000 字节限制，规则组数遵循参考发布契约最多 1000 组。这个上限约束 Manifest 结构，不再决定产物下载次数。树元数据上限为 `1000 × 4 + 64 = 4064` 条目，truncated、重复路径或超限直接拒绝；实际 API JSON 流还受 2,100,000 字节限制。每文件及 Manifest 仍最多 1,000,000 字节。总产物字节数不再累加限制，因为不会同时读取全部产物；Manifest 必须通过完整结构校验，Git tree 必须通过截断、重复路径和条目数检查，不能因过大或截断而忽略部分元数据。原生 fetch 绑定 globalThis，redirect=manual，拒绝所有非200状态；不重试，每个上游请求3秒，一次文件读取总计15秒。目标为Workers Free，不设置付费专用CPU上限；合成规模测试证明按需读取和调用次数，不代表生产CPU、内存或并发容量。
 
