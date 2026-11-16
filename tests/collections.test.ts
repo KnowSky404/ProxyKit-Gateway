@@ -71,7 +71,7 @@ it.each(
     const trailing = await app(request('/'), env);
     expect(await trailing.text()).toBe(text);
     expect(trailing.headers.get('ETag')).toBe(first.headers.get('ETag'));
-    expect(origin.calls).toHaveLength(4);
+    expect(origin.calls).toHaveLength(3);
   },
 );
 
@@ -213,7 +213,7 @@ it('tracks collection additions and deletions at the latest pinned dist version'
   const app = createApp(
     new GitHubArtifactProvider((input, init) => current.request(input, init)),
   );
-  const env = await authEnv();
+  const env = await authEnv({ METADATA_CACHE_TTL_SECONDS: '0' });
   const config = JSON.parse(env.DEVICE_AUTH);
   config.devices[0].paths = ['*'];
   env.DEVICE_AUTH = JSON.stringify(config);
@@ -243,11 +243,11 @@ it('reuses catalog metadata and preserves the existing last-file cache', async (
   expect((await provider.catalog(token)).files).toHaveLength(8);
   expect(origin.calls).toHaveLength(3);
   await provider.artifact('generated/loon/rules/example.list', token);
-  expect(origin.calls).toHaveLength(5);
+  expect(origin.calls).toHaveLength(4);
   await provider.catalog(token);
-  expect(origin.calls).toHaveLength(6);
+  expect(origin.calls).toHaveLength(4);
   await provider.artifact('generated/loon/rules/example.list', token);
-  expect(origin.calls).toHaveLength(7);
+  expect(origin.calls).toHaveLength(4);
 });
 
 it('serves collection JSON through the production entrypoint and native workerd fetch', async () => {

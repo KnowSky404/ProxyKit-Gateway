@@ -43,13 +43,12 @@ describe('GitHub on-demand artifacts', () => {
         .every((call) => call.endsWith(`?ref=${DIST}`)),
     ).toBe(true);
     await provider.artifact(binary, token);
-    expect(origin.calls).toHaveLength(5);
-    expect(origin.calls.at(-1)).toContain('/git/ref/heads/dist');
+    expect(origin.calls).toHaveLength(4);
     await provider.artifact(path, token);
-    expect(origin.calls).toHaveLength(7);
+    expect(origin.calls).toHaveLength(5);
     expect(origin.calls.at(-1)).toContain(`/contents/${path}?`);
     await provider.artifact(binary, token);
-    expect(origin.calls).toHaveLength(9);
+    expect(origin.calls).toHaveLength(6);
   });
   it('cannot mix versions when dist advances during a read', async () => {
     const old = upstream(await fixture(), DIST);
@@ -63,10 +62,10 @@ describe('GitHub on-demand artifacts', () => {
       return (String(input).includes(DIST) ? old : next).request(input, init);
     };
     const provider = new GitHubArtifactProvider(request);
-    expect((await provider.artifact(path, token))?.commit).toBe(DIST);
-    expect(await provider.artifact(path, token)).toBeUndefined();
+    expect((await provider.artifact(path, token, '0'))?.commit).toBe(DIST);
+    expect(await provider.artifact(path, token, '0')).toBeUndefined();
     expect(
-      (await provider.artifact('generated/loon/rules/test.list', token))
+      (await provider.artifact('generated/loon/rules/test.list', token, '0'))
         ?.commit,
     ).toBe(NEXT);
   });
@@ -116,7 +115,7 @@ describe('GitHub on-demand artifacts', () => {
       return (mode === 0 ? first : next).request(input, init);
     });
     const app = createApp(provider);
-    const env = await authEnv();
+    const env = await authEnv({ METADATA_CACHE_TTL_SECONDS: '0' });
     const res = await app(get(), env);
     const etag = res.headers.get('ETag')!;
     expect(res.status).toBe(200);

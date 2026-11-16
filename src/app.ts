@@ -33,7 +33,10 @@ export function createApp(provider: ArtifactProvider) {
       const allowed = await authorize(request, url, env);
       let artifact: Artifact | undefined;
       if (client) {
-        const catalog = await provider.catalog(env.GITHUB_READ_TOKEN);
+        const catalog = await provider.catalog(
+          env.GITHUB_READ_TOKEN,
+          env.METADATA_CACHE_TTL_SECONDS,
+        );
         const resources = catalog.files
           .filter((file) => file.path.startsWith(`generated/${client}/`))
           .map((file) => {
@@ -54,6 +57,7 @@ export function createApp(provider: ArtifactProvider) {
         artifact = await provider.artifact(
           resource!.path,
           env.GITHUB_READ_TOKEN,
+          env.METADATA_CACHE_TTL_SECONDS,
         );
       }
       if (!artifact) throw new GatewayError(404, 'not_found');
