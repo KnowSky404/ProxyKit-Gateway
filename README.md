@@ -1,6 +1,6 @@
 # ProxyKit-Gateway
 
-基于 Cloudflare Workers 的私人规则分发网关。向个人 Loon、Quantumult X、sing-box 设备提供独立鉴权、精确路径授权和经过完整性验证的不可变规则快照。
+基于 Cloudflare Workers 的私人规则分发网关。向个人 Loon、Quantumult X、sing-box 设备提供独立鉴权、固定仓库或精确路径授权和经过完整性验证的不可变规则快照。
 
 ```text
 ProxyKit-Private / dist → 固定 GitHub REST API → Worker → 已授权设备
@@ -59,7 +59,7 @@ curl --fail --header 'Authorization: Bearer DEVICE_TOKEN_PLACEHOLDER' \
   https://gateway.example.com/v1/private/loon/example.list
 ```
 
-支持 GET/HEAD、鉴权后的 ETag/304。所有私人响应 `private, no-store`。完整列表见 [API](docs/api.md)，客户端配置见 [客户端示例](docs/client-examples.md)。
+新设备默认使用 `paths: ["*"]` 授权固定私人仓库内全部当前及未来发布的规则；原有精确路径授权保持不变。规则发布到 `dist` 后自动生效，新增规则只需替换订阅路径，删除后对应地址返回 404，无需重新部署或更新授权。支持 GET/HEAD、鉴权后的 ETag/304。所有私人响应 `private, no-store`。完整列表见 [API](docs/api.md)，客户端配置见 [客户端示例](docs/client-examples.md)。
 
 V1 安全上限：每文件/manifest ≤1,000,000 字节；最多 8 个规则集合、总产物 ≤8,000,000 字节；一次冷加载最多 35 次 GitHub 请求，每次 3 秒、整批 15 秒，不重试。目标为 Workers Free，不配置付费 CPU 上限；免费额度与生产负载须实测，不能通过跳过校验规避超限。超限/损坏/不兼容/上游失败都返回 503，绝不跳过完整校验。每次授权后重新解析 dist；缓存不提供陈旧回退。
 

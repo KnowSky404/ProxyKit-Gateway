@@ -5,20 +5,21 @@ const [id, transport, ...paths] = process.argv.slice(2);
 if (
   !id ||
   !/^[a-z0-9-]{1,64}$/.test(id) ||
-  !['bearer', 'url'].includes(transport ?? '') ||
-  !paths.length
+  !['bearer', 'url'].includes(transport ?? '')
 ) {
   throw new Error(
-    'Usage: bun run device:new <device-id> <bearer|url> <API path> [...]',
+    'Usage: bun run device:new <device-id> <bearer|url> [<API path> ...]',
   );
 }
+if (!paths.length) paths.push('*');
 if (
   paths.length > 32 ||
   new Set(paths).size !== paths.length ||
-  paths.some((path) => !route(path))
+  (!(paths.length === 1 && paths[0] === '*') &&
+    paths.some((path) => !route(path)))
 ) {
   throw new Error(
-    'Use unique, exact /v1/private/... artifact paths (maximum 32).',
+    'Use only * for repository access, or unique exact /v1/private/... artifact paths (maximum 32).',
   );
 }
 const token = btoa(

@@ -9,7 +9,14 @@ interface Device {
   paths: string[];
 }
 
-function paths(value: unknown): string[] {
+function paths(value: unknown, allowRepository = false): string[] {
+  if (
+    allowRepository &&
+    Array.isArray(value) &&
+    value.length === 1 &&
+    value[0] === '*'
+  )
+    return ['*'];
   requireValue(Array.isArray(value) && value.length <= 32);
   requireValue(
     value.every(
@@ -57,7 +64,7 @@ function configuration(secret: string): {
       sha256: d.sha256,
       transport: d.transport,
       enabled: d.enabled,
-      paths: paths(d.paths),
+      paths: paths(d.paths, true),
     };
   });
   return { devices, disabledPaths: paths(config.disabled_paths) };
@@ -104,7 +111,7 @@ export async function authorize(
       device = candidate;
   }
   if (!device) throw new GatewayError(401, 'unauthorized');
-  if (!device.paths.includes(url.pathname))
+  if (!device.paths.includes('*') && !device.paths.includes(url.pathname))
     throw new GatewayError(403, 'forbidden');
   if (config.disabledPaths.includes(url.pathname))
     throw new GatewayError(410, 'subscription_disabled');

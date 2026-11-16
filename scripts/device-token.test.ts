@@ -37,9 +37,20 @@ test('rejects missing, invalid and ambiguous device scopes before generating out
     ['phone', 'bad', path],
     ['phone', 'url', '/manifest.json'],
     ['phone', 'bearer', path, path],
+    ['phone', 'bearer', '*', path],
+    ['phone', 'url', '/v1/private/loon/*'],
   ]) {
     const result = generate(...args);
     expect(result.exitCode).not.toBe(0);
     expect(result.stdout.length).toBe(0);
   }
 });
+
+test.each(['bearer', 'url'])(
+  'defaults %s credentials to fixed repository access',
+  (transport) => {
+    const result = generate('phone', transport);
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(result.stdout.toString()).device.paths).toEqual(['*']);
+  },
+);
