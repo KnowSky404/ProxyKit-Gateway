@@ -10,6 +10,8 @@
 
 仅GET/HEAD；其他已知路由方法405并返回Allow。没有Manifest、目录、规则列表、任意仓库/ref/path/upstream参数或开放代理。名称按架构文档限制，路径不解码后再拼接。URL标准解析器可能在Worker收到请求前归一化点段；任何归一化后的有效路径仍要独立授权，其余编码/非法路径404。
 
+设备可用 `paths: ["*"]` 访问固定私人仓库内全部当前及未来的已验证规则，也可使用精确路径列表。仓库范围设备访问未发布或已删除的合法路径返回404；不提供任意文件读取。新增/删除规则以最新 `dist` 为准，通常无需更新 Worker 或设备授权。
+
 推荐 `Authorization: Bearer DEVICE_TOKEN_PLACEHOLDER`。可选 `?key=DEVICE_URL_TOKEN_PLACEHOLDER` 需要ALLOW_URL_TOKENS=true和transport=url的独立设备摘要。两种凭据不能互用；同时提供Header和key、重复key、错误Header均401，不降级。除key之外的query参数404。HEAD执行与GET相同的认证及完整验证，返回相同元数据及Content-Length但无正文。
 
 | 状态 | 行为                                                          |
@@ -18,7 +20,7 @@
 | 304  | 仅在鉴权、授权、当前快照验证完成后，If-None-Match命中文件摘要 |
 | 400  | 私人资源必须使用HTTPS；不重定向携带凭据的HTTP请求             |
 | 401  | 缺失、错误、撤销、禁用凭据或不允许的凭据传输模式              |
-| 403  | 有效凭据不具备此精确API路径权限                               |
+| 403  | 使用精确路径授权的有效凭据不具备此API路径权限                 |
 | 404  | 无效路由，或已授权路径不存在于当前完整快照                    |
 | 405  | 已知路由不支持的方法                                          |
 | 410  | 有效且有权限的设备访问显式disabled_paths订阅                  |

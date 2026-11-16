@@ -47,7 +47,7 @@ https://gateway.example.com/v1/private/quantumultx/example.list?key=DEVICE_URL_T
 }
 ```
 
-JSON模式将format改为source、URL后缀改为.json，并单独授予该精确路径。Manifest的minimum_reader限制实际客户端最低版本；目前发布工具链使用source_format=2和最低1.10.0，但上述Header下载配置需要1.14+，不能套到旧版本。旧版下载鉴权需按其官方版本能力另行验证，不能虚构Header支持。
+JSON模式将format改为source、URL后缀改为.json；仓库范围凭据自动覆盖两种格式，精确路径凭据须单独授予 `.json` 路径。Manifest的minimum_reader限制实际客户端最低版本；目前发布工具链使用source_format=2和最低1.10.0，但上述Header下载配置需要1.14+，不能套到旧版本。旧版下载鉴权需按其官方版本能力另行验证，不能虚构Header支持。
 
 不要自动添加策略、DNS预解析或download_detour；它们属于用户已有主配置。CIDR如依赖require-no-pre-resolution须维持该前提。Gateway只原样分发已构建字节。
 

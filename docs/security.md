@@ -12,14 +12,14 @@ DEVICE_AUTH是一个Secret JSON：
       "sha256": "REPLACE_WITH_64_LOWERCASE_HEX_SHA256",
       "transport": "bearer",
       "enabled": true,
-      "paths": ["/v1/private/loon/example.list"]
+      "paths": ["*"]
     }
   ],
   "disabled_paths": []
 }
 ```
 
-占位摘要不是有效配置。每设备由本地脚本生成32随机字节、43字符Base64URL Token；Worker只保存其SHA-256和授权。摘要比较使用Workers原生crypto.subtle.timingSafeEqual的固定32字节输入。验证所有设备后决定匹配；不明文比较Token。不缓存身份配置：每次请求重新读取当前绑定，检查enabled、transport、精确路径及disabled_paths。每设备最多32路径，配置按UTF-8计最多5000字节（遵守Cloudflare单个Secret 5KB上限）；设备数同时受配置总大小约束，解析器另限制最多64条设备记录；id/摘要唯一，字段严格匹配，重复键拒绝。
+占位摘要不是有效配置。每设备由本地脚本生成32随机字节、43字符Base64URL Token；Worker只保存其SHA-256和授权。摘要比较使用Workers原生crypto.subtle.timingSafeEqual的固定32字节输入。验证所有设备后决定匹配；不明文比较Token。不缓存身份配置：每次请求重新读取当前绑定，检查enabled、transport、设备范围及disabled_paths。`paths: ["*"]` 显式授权固定仓库内全部当前及未来的已验证产物；基本路由和固定 Provider 仍限制仓库、分支及可下载文件，不能读取任意 GitHub 路径。其他设备配置只接受最多32个精确路径，空数组仍拒绝全部路径；不支持目录通配或将 `*` 与精确路径混用。已有设备不会自动扩大权限；切换仓库范围需要显式更新其 Secret。`disabled_paths` 始终只接受精确路径，仓库范围设备同样遵守停用、撤销和每次请求鉴权。配置按UTF-8计最多5000字节（遵守Cloudflare单个Secret 5KB上限）；设备数同时受配置总大小约束，解析器另限制最多64条设备记录；id/摘要唯一，字段严格匹配，重复键拒绝。
 
 enabled=false或移除摘要使设备401；disabled_paths在已认证且已授权后410。轮换可先添加新的独立id/摘要，再切换设备，最后删除旧条目。紧急撤销直接删除/禁用并100%部署新的Secret版本；部署传播和已在途请求存在平台边界，不允许渐进部署旧认证版本后声称全球立即撤销。客户端已下载的规则无法远程销毁。
 

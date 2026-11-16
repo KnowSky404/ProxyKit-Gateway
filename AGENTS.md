@@ -28,7 +28,7 @@
 
 ## 私人内容与安全边界
 
-- 顺序不可改变：基本路由检查 → 设备认证 → 精确路径授权/停用 → 固定 GitHub Provider。任何缓存命中和 304 也必须鉴权。GitHub 凭据不得返回给设备。
+- 顺序不可改变：基本路由检查 → 设备认证 → 设备范围授权/精确路径停用 → 固定 GitHub Provider。任何缓存命中和 304 也必须鉴权。GitHub 凭据不得返回给设备。设备可用 `paths: ["*"]` 授权固定仓库内全部当前及未来的已验证规则，或保留精确路径授权；不支持其他通配表达式，`disabled_paths` 只接受精确路径。
 - 遵守 docs/architecture.md 的私人 Schema v1 与规模上限。绑定同一 dist SHA，验证完整快照之后才能提供任何文件；不能因规模、超时、上游错误、损坏或未知 Schema 跳过校验。
 - 不输出原始异常、URL/query、Header、Token、私人正文/名称/地址或 GitHub 响应。只记录固定错误类别、状态和随机 requestId。迁移必须保留查询脱敏、禁用 invocation logs/traces 及其他安全配置，不能因 CLI 差异静默丢弃。
 - 所有凭据用 Secret Binding；不提交 .dev.vars/.env、真实数据、下载结果或临时文件，不上传私人 Actions Artifact。测试只用保留数据和合成字节，不依赖真实个人 Token 或私人规则。不修改 ProxyKit、ProxyKit-Private 或 dist。

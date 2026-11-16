@@ -16,10 +16,12 @@
 bun install --frozen-lockfile
 umask 077
 mkdir -p .cloudflare/private
-bun run device:new phone-header bearer /v1/private/loon/example.list > .cloudflare/private/phone.json
+bun run device:new phone-header bearer > .cloudflare/private/phone.json
 ```
 
-生成结果包含一次显示的 Token 和 device 条目。将条目加入 `DEVICE_AUTH.devices`，把 Token 私下送到设备。`disabled_paths` 默认为空数组。授权必须列出精确路径，最多 32 个；需要全部当前订阅时从已验证快照列出全部路径，不使用通配符，也不关闭鉴权。新增订阅后须更新设备授权。
+生成结果包含一次显示的 Token 和 device 条目。将条目加入 `DEVICE_AUTH.devices`，把 Token 私下送到设备。`disabled_paths` 默认为空数组。不传路径时默认生成 `paths: ["*"]`，授权固定私人仓库内全部当前及未来发布的规则；它只覆盖现有 API 路由和完整验证后的 `dist` 产物，不开放任意 GitHub 文件。新增规则只需使用对应订阅路径，删除已发布产物后原地址返回 404，无需重新部署网关或修改授权。也可在命令末尾传入最多 32 个精确 API 路径，限制设备范围；不支持目录通配，不能混用 `*` 与精确路径。
+
+已有设备不会自动扩大权限：要切换为仓库范围，将该设备的 `paths` 一次性改成 `["*"]`，保留 id、摘要、transport、enabled 和停用列表，并按下文上传、核验、100% 激活新代码和 Secrets。原 Token 与订阅地址不变；其后新增规则无需再次改授权。回滚到不支持仓库范围的旧代码前，须使用兼容的精确路径授权配置，同时保留最新撤销和停用状态。
 
 支持 Header 的客户端使用 Bearer。不能可靠设置 Header 的订阅客户端可另生成 `transport=url` 的凭据；两种 transport 不复用 Token。URL Token 可能随订阅配置、备份或平台访问记录泄露，按设备拆分后可独立撤销。不要将完整订阅 URL 粘贴到公共调试工具。
 

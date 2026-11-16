@@ -7,6 +7,7 @@ import {
   authEnv,
   fixture,
   get,
+  NEXT,
   TOKEN,
   URL_TOKEN,
   upstream,
@@ -45,6 +46,15 @@ describe('HTTP and access control', () => {
     expect(await res.json()).toEqual({ status: 'ok' });
     expect(origin.calls).toHaveLength(0);
   });
+  it('requires a fully verified snapshot even with repository access', async () => {
+    const { app, env, data } = await setup();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const config = JSON.parse(env.DEVICE_AUTH);
+    config.devices[0].paths = ['*'];
+    env.DEVICE_AUTH = JSON.stringify(config);
+    data.bytes.set('generated/sing-box/rules/example.srs', new Uint8Array([0]));
+    expect((await app(get(), env)).status).toBe(503);
+  });
   it.each([
     ['/v1/private/loon/example.list', 'text/plain; charset=utf-8'],
     ['/v1/private/quantumultx/example.list', 'text/plain; charset=utf-8'],
@@ -75,6 +85,70 @@ describe('HTTP and access control', () => {
     );
     expect(origin.calls).toHaveLength(0);
   });
+  it.each(['bearer', 'url'])(
+    'tracks additions and deletions for %s repository access while enforcing authentication and disabling',
+    async (transport) => {
+      let current = upstream(await fixture());
+      const request = vi.fn<typeof fetch>((input, init) =>
+        current.request(input, init),
+      );
+      const app = createApp(new GitHubArtifactProvider(request));
+      const env = await authEnv({ ALLOW_URL_TOKENS: 'true' });
+      const config = JSON.parse(env.DEVICE_AUTH);
+      for (const device of config.devices) device.paths = ['*'];
+      env.DEVICE_AUTH = JSON.stringify(config);
+      const download = (path: string, init: RequestInit = {}) =>
+        get(
+          transport === 'url' ? `${path}?key=${URL_TOKEN}` : path,
+          transport === 'url' ? null : TOKEN,
+          init,
+        );
+      const added = '/v1/private/loon/new.list';
+      expect((await app(download(API_PATH), env)).status).toBe(200);
+      expect((await app(download(added), env)).status).toBe(404);
+      current = upstream(await fixture(['example', 'new']), NEXT);
+      const published = await app(download(added), env);
+      expect(published.status).toBe(200);
+      expect(published.headers.get('X-Distribution-Commit')).toBe(NEXT);
+      current = upstream(await fixture(['new']), 'e'.repeat(40));
+      expect((await app(download(API_PATH), env)).status).toBe(404);
+      const head = await app(download(added, { method: 'HEAD' }), env);
+      expect(head.status).toBe(200);
+      expect(await head.text()).toBe('');
+      const conditional = {
+        headers: { 'If-None-Match': head.headers.get('ETag')! },
+      };
+      expect((await app(download(added, conditional), env)).status).toBe(304);
+      const calls = request.mock.calls.length;
+      expect((await app(get(added, null, conditional), env)).status).toBe(401);
+      expect((await app(download('/manifest.json'), env)).status).toBe(404);
+      config.disabled_paths = [added];
+      env.DEVICE_AUTH = JSON.stringify(config);
+      expect((await app(download(added, conditional), env)).status).toBe(410);
+      for (const device of config.devices) device.enabled = false;
+      env.DEVICE_AUTH = JSON.stringify(config);
+      expect((await app(download(added, conditional), env)).status).toBe(401);
+      expect(request.mock.calls).toHaveLength(calls);
+    },
+  );
+  it.each([
+    { paths: ['*', API_PATH], disabled: [] },
+    { paths: ['*', '*'], disabled: [] },
+    { paths: ['/v1/private/loon/*'], disabled: [] },
+    { paths: ['*'], disabled: ['*'] },
+  ])(
+    'rejects ambiguous scopes and wildcard disabling: %j',
+    async ({ paths, disabled }) => {
+      const { app, env, origin } = await setup();
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      const config = JSON.parse(env.DEVICE_AUTH);
+      config.devices[0].paths = paths;
+      config.disabled_paths = disabled;
+      env.DEVICE_AUTH = JSON.stringify(config);
+      expect((await app(get(), env)).status).toBe(503);
+      expect(origin.calls).toHaveLength(0);
+    },
+  );
   it('revokes immediately even after a snapshot was cached', async () => {
     const { app, env, origin } = await setup();
     expect((await app(get(), env)).status).toBe(200);
