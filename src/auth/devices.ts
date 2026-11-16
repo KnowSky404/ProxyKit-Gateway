@@ -1,4 +1,4 @@
-import { DIGEST, route } from '../config/contract';
+import { collection, DIGEST, route } from '../config/contract';
 import { GatewayError, requireValue } from '../http/errors';
 import { fields, parseJson } from '../manifest/json';
 
@@ -74,7 +74,7 @@ export async function authorize(
   request: Request,
   url: URL,
   env: Env,
-): Promise<void> {
+): Promise<(path: string) => boolean> {
   const header = request.headers.get('Authorization');
   const keys = url.searchParams.getAll('key');
   const transport = header !== null ? 'bearer' : 'url';
@@ -111,8 +111,17 @@ export async function authorize(
       device = candidate;
   }
   if (!device) throw new GatewayError(401, 'unauthorized');
-  if (!device.paths.includes('*') && !device.paths.includes(url.pathname))
-    throw new GatewayError(403, 'forbidden');
-  if (config.disabledPaths.includes(url.pathname))
+  const scope = device.paths;
+  const allowed = (path: string) => scope.includes('*') || scope.includes(path);
+  const client = collection(url.pathname);
+  if (client) {
+    if (
+      !scope.includes('*') &&
+      !scope.some((path) => path.startsWith(`/v1/private/${client}/`))
+    )
+      throw new GatewayError(403, 'forbidden');
+  } else if (!allowed(url.pathname)) throw new GatewayError(403, 'forbidden');
+  if (!client && config.disabledPaths.includes(url.pathname))
     throw new GatewayError(410, 'subscription_disabled');
+  return (path) => allowed(path) && !config.disabledPaths.includes(path);
 }

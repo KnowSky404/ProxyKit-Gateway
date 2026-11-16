@@ -17,6 +17,10 @@ export function artifactPaths(name: string): string[] {
   ];
 }
 
+export function collection(path: string): string | undefined {
+  return /^\/v1\/private\/(loon|quantumultx|sing-box)\/?$/.exec(path)?.[1];
+}
+
 export function route(
   path: string,
 ): { path: string; contentType: string } | undefined {

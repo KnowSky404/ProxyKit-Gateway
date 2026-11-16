@@ -59,6 +59,8 @@ curl --fail --header 'Authorization: Bearer DEVICE_TOKEN_PLACEHOLDER' \
   https://gateway.example.com/v1/private/loon/example.list
 ```
 
+REST集合接口：携带URL专用KEY访问 `/v1/private/loon?key=DEVICE_URL_TOKEN_PLACEHOLDER` 可获得 `{ "resources": [{ "name": "example.list", "path": "/v1/private/loon/example.list" }] }`；`quantumultx`、`sing-box`同理。列表仅包含设备有权访问且未停用的资源，路径不包含KEY；访问具体文件时继续携带原凭据。也支持Bearer、HEAD和鉴权后的304。目录只读取发布元数据，不下载规则正文。
+
 新设备默认使用 `paths: ["*"]` 授权固定私人仓库内全部当前及未来发布的规则；原有精确路径授权保持不变。规则发布到 `dist` 后自动生效，新增规则只需替换订阅路径，删除后对应地址返回 404，无需重新部署或更新授权。支持 GET/HEAD、鉴权后的 ETag/304。所有私人响应 `private, no-store`。完整列表见 [API](docs/api.md)，客户端配置见 [客户端示例](docs/client-examples.md)。
 
 每次订阅只下载目标文件，不下载其他规则或格式。冷读取固定 4 次 GitHub 调用（dist ref、Git tree、Manifest、目标文件）；同版本换文件需 2 次，同文件命中缓存只查 ref 1 次。请求数不随规则组数增长。取消网关额外的 8 组/总产物 8 MB 限制，遵循发布者最多 1000 组的 Schema v1；每文件/Manifest ≤1,000,000 字节，树元数据最多 4064 条目，API JSON ≤2,100,000 字节。缓存保留版本元数据和最近一个验证后的文件，文件字节最多 1 MB。每个上游请求 3 秒、单次文件读取总计 15 秒，不重试。目标为 Workers Free，生产 CPU/并发容量仍须实测。每次授权后重新解析 dist，不使用旧版本回退；Manifest 无效、目标文件损坏、超限或上游失败返回 503，未发布或已删除的授权路径返回 404。

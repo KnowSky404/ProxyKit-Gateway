@@ -1,7 +1,8 @@
 import { authorize } from './auth/devices';
-import { route } from './config/contract';
+import { collection, route } from './config/contract';
 import { GatewayError, response } from './http/errors';
-import type { ArtifactProvider } from './providers/github';
+import { sha256 } from './manifest/validate';
+import type { Artifact, ArtifactProvider } from './providers/github';
 
 export function createApp(provider: ArtifactProvider) {
   return async (request: Request, env: Env): Promise<Response> => {
@@ -10,7 +11,8 @@ export function createApp(provider: ArtifactProvider) {
     try {
       const url = new URL(request.url);
       const resource = route(url.pathname);
-      if (url.pathname !== '/v1/health' && !resource)
+      const client = collection(url.pathname);
+      if (url.pathname !== '/v1/health' && !resource && !client)
         throw new GatewayError(404, 'not_found');
       if (request.method !== 'GET' && !head) {
         return response('Method not allowed\n', 405, {
@@ -28,15 +30,38 @@ export function createApp(provider: ArtifactProvider) {
         throw new GatewayError(404, 'not_found');
       if (url.protocol !== 'https:')
         throw new GatewayError(400, 'https_required');
-      await authorize(request, url, env);
-      const artifact = await provider.artifact(
-        resource!.path,
-        env.GITHUB_READ_TOKEN,
-      );
+      const allowed = await authorize(request, url, env);
+      let artifact: Artifact | undefined;
+      if (client) {
+        const catalog = await provider.catalog(env.GITHUB_READ_TOKEN);
+        const resources = catalog.files
+          .filter((file) => file.path.startsWith(`generated/${client}/`))
+          .map((file) => {
+            const name = file.path.split('/').at(-1)!;
+            return { name, path: `/v1/private/${client}/${name}` };
+          })
+          .filter((file) => allowed(file.path));
+        const bytes = new Uint8Array(
+          new TextEncoder().encode(JSON.stringify({ resources }) + '\n'),
+        );
+        artifact = {
+          path: url.pathname,
+          commit: catalog.commit,
+          bytes,
+          sha256: await sha256(bytes),
+        };
+      } else {
+        artifact = await provider.artifact(
+          resource!.path,
+          env.GITHUB_READ_TOKEN,
+        );
+      }
       if (!artifact) throw new GatewayError(404, 'not_found');
       const etag = `"sha256-${artifact.sha256}"`;
       const headers = {
-        'Content-Type': resource!.contentType,
+        'Content-Type': client
+          ? 'application/json; charset=utf-8'
+          : resource!.contentType,
         ETag: etag,
         'X-Distribution-Commit': artifact.commit,
         'X-Request-Id': requestId,
