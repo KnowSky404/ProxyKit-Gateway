@@ -7,6 +7,7 @@ export const MAX_TREE_ENTRIES = MAX_RULE_SETS * 4 + 64;
 export const MAX_UPSTREAM_JSON_BYTES = 2_100_000;
 export const UPSTREAM_TIMEOUT_MS = 3000;
 export const ARTIFACT_TIMEOUT_MS = 15000;
+export const DEFAULT_METADATA_CACHE_TTL_SECONDS = '60';
 
 export function artifactPaths(name: string): string[] {
   return [

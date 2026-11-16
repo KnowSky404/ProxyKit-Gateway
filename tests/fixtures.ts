@@ -14,6 +14,7 @@ export const enc = {
 export async function authEnv(overrides: Partial<Env> = {}): Promise<Env> {
   return {
     ALLOW_URL_TOKENS: 'false',
+    METADATA_CACHE_TTL_SECONDS: '60',
     GITHUB_READ_TOKEN: 'origin-test-placeholder',
     DEVICE_AUTH: JSON.stringify({
       devices: [

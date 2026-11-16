@@ -4,6 +4,7 @@ import {
   MAX_TREE_ENTRIES,
   MAX_UPSTREAM_JSON_BYTES,
   ARTIFACT_TIMEOUT_MS,
+  DEFAULT_METADATA_CACHE_TTL_SECONDS,
   UPSTREAM_TIMEOUT_MS,
 } from '../config/contract';
 import { GatewayError, requireValue } from '../http/errors';
@@ -18,9 +19,14 @@ export interface Artifact {
   sha256: string;
 }
 export interface ArtifactProvider {
-  artifact(path: string, token: string): Promise<Artifact | undefined>;
+  artifact(
+    path: string,
+    token: string,
+    ttlSeconds?: string,
+  ): Promise<Artifact | undefined>;
   catalog(
     token: string,
+    ttlSeconds?: string,
   ): Promise<{ commit: string; files: readonly ManifestFile[] }>;
 }
 
@@ -72,6 +78,7 @@ export class GitHubArtifactProvider implements ArtifactProvider {
     manifest: Manifest;
     tree: ReadonlyMap<string, Record<string, unknown>>;
     artifact?: Artifact;
+    checkedAt: number;
   };
   private retryAt = 0;
 
@@ -79,9 +86,13 @@ export class GitHubArtifactProvider implements ArtifactProvider {
     private readonly request: typeof fetch = fetch.bind(globalThis),
   ) {}
 
-  async artifact(path: string, token: string): Promise<Artifact | undefined> {
+  async artifact(
+    path: string,
+    token: string,
+    ttlSeconds?: string,
+  ): Promise<Artifact | undefined> {
     try {
-      const { cached, read } = await this.load(token);
+      const { cached, read } = await this.load(token, ttlSeconds);
       const entry = cached.manifest.files.find((file) => file.path === path);
       if (!entry) return;
       if (cached.artifact?.path === path) return cached.artifact;
@@ -105,12 +116,15 @@ export class GitHubArtifactProvider implements ArtifactProvider {
     }
   }
 
-  async catalog(token: string) {
-    const { cached } = await this.load(token);
+  async catalog(token: string, ttlSeconds?: string) {
+    const { cached } = await this.load(token, ttlSeconds);
     return { commit: cached.commit, files: cached.manifest.files };
   }
 
-  private async load(token: string) {
+  private async load(
+    token: string,
+    ttlSeconds: string = DEFAULT_METADATA_CACHE_TTL_SECONDS,
+  ) {
     if (
       typeof token !== 'string' ||
       !token.trim() ||
@@ -118,6 +132,12 @@ export class GitHubArtifactProvider implements ArtifactProvider {
     ) {
       throw new GatewayError(503, 'origin_configuration');
     }
+    const ttlMs =
+      typeof ttlSeconds === 'string' && /^[0-9]+$/.test(ttlSeconds)
+        ? Number(ttlSeconds) * 1000
+        : NaN;
+    if (!Number.isSafeInteger(ttlMs))
+      throw new GatewayError(503, 'cache_configuration');
     if (Date.now() < this.retryAt) {
       throw new GatewayError(
         503,
@@ -170,13 +190,22 @@ export class GitHubArtifactProvider implements ArtifactProvider {
       }
     };
     try {
-      const ref = object((await api('git/ref/heads/dist')).object);
-      requireValue(
-        ref.type === 'commit' &&
-          typeof ref.sha === 'string' &&
-          COMMIT.test(ref.sha),
-      );
-      const commit = ref.sha;
+      const checkedAt = Date.now();
+      let cached = this.cached;
+      const fresh =
+        cached !== undefined &&
+        checkedAt >= cached.checkedAt &&
+        checkedAt - cached.checkedAt < ttlMs;
+      let commit = fresh ? cached?.commit : undefined;
+      if (!commit) {
+        const ref = object((await api('git/ref/heads/dist')).object);
+        requireValue(
+          ref.type === 'commit' &&
+            typeof ref.sha === 'string' &&
+            COMMIT.test(ref.sha),
+        );
+        commit = ref.sha;
+      }
       const read = async (
         path: string,
         tree: ReadonlyMap<string, Record<string, unknown>>,
@@ -212,7 +241,6 @@ export class GitHubArtifactProvider implements ArtifactProvider {
         requireValue(binary.length === obj.size && btoa(binary) === encoded);
         return Uint8Array.from(binary, (char) => char.charCodeAt(0));
       };
-      let cached = this.cached;
       if (cached?.commit !== commit) {
         // Discard the previous version before loading a new one; never backfill deleted paths.
         this.cached = undefined;
@@ -235,9 +263,10 @@ export class GitHubArtifactProvider implements ArtifactProvider {
             ),
           ),
         );
-        cached = { commit, manifest, tree };
+        cached = { commit, manifest, tree, checkedAt };
         this.cached = cached;
       }
+      if (!fresh) cached.checkedAt = checkedAt;
       return { cached, read: (path: string) => read(path, cached.tree) };
     } catch (error) {
       this.cached = undefined;

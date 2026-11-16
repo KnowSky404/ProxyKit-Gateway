@@ -96,7 +96,10 @@ describe('HTTP and access control', () => {
         current.request(input, init),
       );
       const app = createApp(new GitHubArtifactProvider(request));
-      const env = await authEnv({ ALLOW_URL_TOKENS: 'true' });
+      const env = await authEnv({
+        ALLOW_URL_TOKENS: 'true',
+        METADATA_CACHE_TTL_SECONDS: '0',
+      });
       const config = JSON.parse(env.DEVICE_AUTH);
       for (const device of config.devices) device.paths = ['*'];
       env.DEVICE_AUTH = JSON.stringify(config);
