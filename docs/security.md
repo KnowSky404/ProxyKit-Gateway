@@ -1,6 +1,6 @@
 # 安全边界
 
-GITHUB_READ_TOKEN只允许固定私人仓库Contents: Read，与设备凭据完全独立。Provider固定api.github.com/KnowSky404/ProxyKit-Private，ref只发现dist，读取固定SHA与Manifest白名单。客户端无法指定仓库、Git ref、内部路径或URL；先检查同一SHA的Git tree普通文件mode，拒绝Contents API解引用的符号链接；树元数据最多64条目，truncated直接拒绝。不请求临时download_url，禁止重定向，避免SSRF及凭据被带往别处。
+GITHUB_READ_TOKEN只允许固定私人仓库Contents: Read，与设备凭据完全独立。Provider固定api.github.com/KnowSky404/ProxyKit-Private，ref只发现dist，读取固定SHA与Manifest白名单。客户端无法指定仓库、Git ref、内部路径或URL；先检查同一SHA下Manifest与目标文件的Git tree普通文件mode，拒绝Contents API解引用的符号链接；树元数据最多4064条目，truncated直接拒绝。不请求临时download_url，禁止重定向，避免SSRF及凭据被带往别处。
 
 DEVICE_AUTH是一个Secret JSON：
 
@@ -27,9 +27,9 @@ URL Token默认禁用，仅作Loon/QX待验收的兼容方案，必须与Bearer�
 
 Worker仅记录固定错误类别、状态与随机requestId；不记录原始异常、URL/query、Header、设备信息、正文或GitHub响应。cloudflare.config.ts显式redactQueryString=true、invocationLogs=false、traces.enabled=false（为满足URL凭据边界，优先于通用trace默认值）；保留脱敏应用错误日志。不启用Logpush、Tail或第三方追踪。平台网络层、客户端和本地开发服务器请求日志不受应用日志代码控制，部署前审计整条链路；实际隐私验证未覆盖Cloudflare生产。参考[观测配置](https://developers.cloudflare.com/workers/wrangler/configuration/#observability)。
 
-私人资源在入口强制HTTPS（HTTP返回400且不读取上游）；health可通过HTTP用于本地检查。响应永远private,no-store，Cloudflare Cache API不保存私有响应。每次304或内存命中都重新鉴权。部署域名必须配置绕过Cache Rules/CDN共享缓存，不得用Cache Everything覆盖响应，也不得在Worker前加绕过鉴权的缓存。不要记录带Cookie/Token/完整URL的缓存键；当前缓存仅使用不可变dist SHA。
+私人资源在入口强制HTTPS（HTTP返回400且不读取上游）；health可通过HTTP用于本地检查。响应永远private,no-store，Cloudflare Cache API不保存私有响应。每次304或内存命中都重新鉴权。部署域名必须配置绕过Cache Rules/CDN共享缓存，不得用Cache Everything覆盖响应，也不得在Worker前加绕过鉴权的缓存。不要记录带Cookie/Token/完整URL的缓存键；当前元数据缓存按不可变dist SHA区分，字节缓存额外绑定目标路径，只保留最近一个文件。
 
-上游响应流与文件大小都有硬上限；只在全部字节摘要验证后原子可用。GitHub TLS和受信任发布者仍是信任边界：Manifest摘要防损坏/混读，不是独立签名，无法防御同时篡改Manifest与产物的仓库写入者。不执行产物代码，不编译或反序列化SRS。
+上游响应流与文件大小都有硬上限；只在所请求文件的全部字节通过声明大小和摘要验证后返回。其他产物正文不预取、不校验，不因其损坏而阻断当前目标；全局 Manifest 和目标文件校验保持严格。GitHub TLS和受信任发布者仍是信任边界：Manifest摘要防损坏/混读，不是独立签名，无法防御同时篡改Manifest与产物的仓库写入者。不执行产物代码，不编译或反序列化SRS。
 
 公开CI无生产Secrets，禁pull_request_target，Actions固定完整SHA，contents:read，依赖锁定并审计，不上传私人数据Artifact。部署只main显式手动触发，production环境建议配置必需审批。无法防御有权修改代码/Secrets/Cloudflare配置的维护者。本次不擅自新增分支保护或仓库设置；实际门禁状态以GitHub为准。
 

@@ -29,14 +29,16 @@ export function createApp(provider: ArtifactProvider) {
       if (url.protocol !== 'https:')
         throw new GatewayError(400, 'https_required');
       await authorize(request, url, env);
-      const snapshot = await provider.snapshot(env.GITHUB_READ_TOKEN);
-      const artifact = snapshot.files.get(resource!.path);
+      const artifact = await provider.artifact(
+        resource!.path,
+        env.GITHUB_READ_TOKEN,
+      );
       if (!artifact) throw new GatewayError(404, 'not_found');
       const etag = `"sha256-${artifact.sha256}"`;
       const headers = {
         'Content-Type': resource!.contentType,
         ETag: etag,
-        'X-Distribution-Commit': snapshot.commit,
+        'X-Distribution-Commit': artifact.commit,
         'X-Request-Id': requestId,
       };
       const conditional = request.headers.get('If-None-Match');

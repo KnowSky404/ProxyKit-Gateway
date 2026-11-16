@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createApp } from '../src/app';
 import { GitHubArtifactProvider } from '../src/providers/github';
+import { MAX_TREE_ENTRIES } from '../src/config/contract';
+import { sha256 } from '../src/manifest/validate';
 import {
   API_PATH,
   authEnv,
@@ -17,30 +19,39 @@ import {
 
 afterEach(() => vi.restoreAllMocks());
 const token = 'origin-test-placeholder';
+const path = 'generated/loon/rules/example.list';
 
-describe('GitHub immutable snapshots', () => {
-  it('pins every read to one dist SHA, verifies all files and preserves SRS bytes', async () => {
+describe('GitHub on-demand artifacts', () => {
+  it('downloads only the requested artifact and bounds the byte cache to one file', async () => {
     const data = await fixture();
     const origin = upstream(data);
     const provider = new GitHubArtifactProvider(origin.request);
-    const snapshot = await provider.snapshot(token);
-    expect(snapshot.commit).toBe(DIST);
-    expect(snapshot.files.size).toBe(4);
-    expect(
-      snapshot.files.get('generated/sing-box/rules/example.srs')!.bytes,
-    ).toEqual(data.bytes.get('generated/sing-box/rules/example.srs'));
+    const binary = 'generated/sing-box/rules/example.srs';
+    const artifact = await provider.artifact(binary, token);
+    expect(artifact?.commit).toBe(DIST);
+    expect(artifact?.bytes).toEqual(data.bytes.get(binary));
     expect(origin.calls[1]).toContain(`/git/trees/${DIST}?recursive=1`);
-    expect(origin.calls).toHaveLength(7);
+    expect(origin.calls).toHaveLength(4);
+    expect(
+      origin.calls
+        .filter((call) => call.includes('/contents/'))
+        .map((call) => new URL(call).pathname.split('/contents/')[1]),
+    ).toEqual(['manifest.json', binary]);
     expect(
       origin.calls
         .filter((call) => call.includes('/contents/'))
         .every((call) => call.endsWith(`?ref=${DIST}`)),
     ).toBe(true);
-    await provider.snapshot(token);
-    expect(origin.calls).toHaveLength(8);
+    await provider.artifact(binary, token);
+    expect(origin.calls).toHaveLength(5);
     expect(origin.calls.at(-1)).toContain('/git/ref/heads/dist');
+    await provider.artifact(path, token);
+    expect(origin.calls).toHaveLength(7);
+    expect(origin.calls.at(-1)).toContain(`/contents/${path}?`);
+    await provider.artifact(binary, token);
+    expect(origin.calls).toHaveLength(9);
   });
-  it('cannot mix snapshots when dist advances during a read', async () => {
+  it('cannot mix versions when dist advances during a read', async () => {
     const old = upstream(await fixture(), DIST);
     const next = upstream(await fixture(['test']), NEXT);
     let refs = 0;
@@ -52,33 +63,51 @@ describe('GitHub immutable snapshots', () => {
       return (String(input).includes(DIST) ? old : next).request(input, init);
     };
     const provider = new GitHubArtifactProvider(request);
-    expect((await provider.snapshot(token)).commit).toBe(DIST);
-    const updated = await provider.snapshot(token);
-    expect(updated.commit).toBe(NEXT);
-    expect(updated.files.has('generated/loon/rules/example.list')).toBe(false);
-    expect(updated.files.has('generated/loon/rules/test.list')).toBe(true);
+    expect((await provider.artifact(path, token))?.commit).toBe(DIST);
+    expect(await provider.artifact(path, token)).toBeUndefined();
+    expect(
+      (await provider.artifact('generated/loon/rules/test.list', token))
+        ?.commit,
+    ).toBe(NEXT);
   });
-  it.each(['digest', 'size', 'sibling'])(
-    'rejects corrupted %s without publishing a partial snapshot',
+  it.each(['digest', 'size'])(
+    'rejects a requested file with a corrupted %s',
     async (damage) => {
       const data = await fixture();
-      const target = data.manifest.files[damage === 'sibling' ? 3 : 0]!;
+      const target = data.manifest.files[0]!;
       if (damage === 'size') target.size++;
       else target.sha256 = '0'.repeat(64);
       const provider = new GitHubArtifactProvider(upstream(data).request);
-      await expect(provider.snapshot(token)).rejects.toMatchObject({
+      await expect(provider.artifact(path, token)).rejects.toMatchObject({
         status: 503,
       });
-      target.sha256 = (await fixture()).manifest.files[
-        damage === 'sibling' ? 3 : 0
-      ]!.sha256;
-      if (damage === 'size') target.size--;
-      expect((await provider.snapshot(token)).files.size).toBe(4);
+      const original = (await fixture()).manifest.files[0]!;
+      target.sha256 = original.sha256;
+      target.size = original.size;
+      expect((await provider.artifact(path, token))?.bytes).toEqual(
+        data.bytes.get(path),
+      );
     },
   );
-  it('does not reuse old files or a matching ETag after deletion or refresh failure', async () => {
+  it('does not read or depend on unrequested file bodies', async () => {
     const data = await fixture();
-    const first = upstream(data);
+    const binary = 'generated/sing-box/rules/example.srs';
+    data.bytes.delete(binary);
+    const origin = upstream(data);
+    const provider = new GitHubArtifactProvider(origin.request);
+    expect((await provider.artifact(path, token))?.bytes).toEqual(
+      data.bytes.get(path),
+    );
+    expect(origin.calls).toHaveLength(4);
+    expect(
+      origin.calls.some((call) => call.includes(`/contents/${binary}?`)),
+    ).toBe(false);
+    await expect(provider.artifact(binary, token)).rejects.toMatchObject({
+      status: 503,
+    });
+  });
+  it('does not reuse old files or a matching ETag after deletion or refresh failure', async () => {
+    const first = upstream(await fixture());
     const next = upstream(await fixture(['test']), NEXT);
     let mode = 0;
     const provider = new GitHubArtifactProvider(async (input, init) => {
@@ -100,48 +129,59 @@ describe('GitHub immutable snapshots', () => {
         )
       ).status,
     ).toBe(404);
+    expect(next.calls).toHaveLength(3);
     mode = 2;
     vi.spyOn(console, 'error').mockImplementation(() => {});
     expect((await app(get(), env)).status).toBe(503);
   });
-  it('accepts the maximum eight-set, eight-MB snapshot with one-MB files', async () => {
-    const data = await fixture(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'], 1);
-    const { sha256 } = await import('../src/manifest/validate');
-    for (const [i, entry] of data.manifest.files.slice(0, 8).entries()) {
-      entry.size = i < 7 ? 1_000_000 : 999_976;
-      const bytes = new Uint8Array(entry.size).fill(65);
-      data.bytes.set(entry.path, bytes);
-      entry.sha256 = await sha256(bytes);
-    }
-    expect(data.manifest.files.reduce((sum, f) => sum + f.size, 0)).toBe(
-      8_000_000,
+  it('serves one one-MB file beyond eight sets and eight-MB aggregate in four calls', async () => {
+    const data = await fixture(
+      ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i'],
+      1,
     );
+    const bytes = new Uint8Array(1_000_000).fill(65);
+    const digest = await sha256(bytes);
+    for (const entry of data.manifest.files) {
+      entry.size = bytes.length;
+      entry.sha256 = digest;
+      data.bytes.set(entry.path, bytes);
+    }
     const origin = upstream(data);
-    expect(
-      (await new GitHubArtifactProvider(origin.request).snapshot(token)).files
-        .size,
-    ).toBe(32);
-    expect(origin.calls).toHaveLength(35);
+    const artifact = await new GitHubArtifactProvider(origin.request).artifact(
+      data.manifest.files[0]!.path,
+      token,
+    );
+    expect(artifact?.bytes).toEqual(bytes);
+    expect(data.manifest.files.reduce((sum, f) => sum + f.size, 0)).toBe(
+      36_000_000,
+    );
+    expect(origin.calls).toHaveLength(4);
   });
-  it.each(['sets', 'aggregate'])(
-    'rejects the %s scale limit before fetching artifacts',
-    async (limit) => {
-      const data = await fixture(
-        limit === 'sets'
-          ? ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i']
-          : ['a', 'b', 'c'],
-      );
-      if (limit === 'aggregate')
-        data.manifest.files.forEach((f) => {
-          f.size = 1_000_000;
-        });
-      const origin = upstream(data);
-      await expect(
-        new GitHubArtifactProvider(origin.request).snapshot(token),
-      ).rejects.toMatchObject({ status: 503 });
-      expect(origin.calls).toHaveLength(3);
-    },
-  );
+  it('keeps request count constant at the publisher contract maximum of 1000 sets', async () => {
+    const names = Array.from(
+      { length: 1000 },
+      (_, i) => `r${String(i).padStart(4, '0')}`,
+    );
+    const data = await fixture(names);
+    const origin = upstream(data);
+    const target = data.manifest.files.at(-1)!.path;
+    expect(
+      (await new GitHubArtifactProvider(origin.request).artifact(target, token))
+        ?.bytes,
+    ).toEqual(data.bytes.get(target));
+    expect(origin.calls).toHaveLength(4);
+  });
+  it('rejects manifests beyond the publisher contract before fetching artifacts', async () => {
+    const names = Array.from(
+      { length: 1001 },
+      (_, i) => `r${String(i).padStart(4, '0')}`,
+    );
+    const origin = upstream(await fixture(names));
+    await expect(
+      new GitHubArtifactProvider(origin.request).artifact(path, token),
+    ).rejects.toMatchObject({ status: 503 });
+    expect(origin.calls).toHaveLength(3);
+  });
 });
 
 describe('origin faults and trust boundaries', () => {
@@ -176,7 +216,7 @@ describe('origin faults and trust boundaries', () => {
       async () =>
         new Response(null, { status: 429, headers: { 'Retry-After': date } }),
     );
-    await expect(provider.snapshot(token)).rejects.toMatchObject({
+    await expect(provider.artifact(path, token)).rejects.toMatchObject({
       status: 503,
       category: 'upstream_rate_limit',
     });
@@ -208,7 +248,7 @@ describe('origin faults and trust boundaries', () => {
       });
     };
     await expect(
-      new GitHubArtifactProvider(request).snapshot(token),
+      new GitHubArtifactProvider(request).artifact(path, token),
     ).rejects.toMatchObject({ status: 503 });
   });
   it.each([
@@ -243,7 +283,7 @@ describe('origin faults and trust boundaries', () => {
       return Response.json(data);
     };
     await expect(
-      new GitHubArtifactProvider(request).snapshot(token),
+      new GitHubArtifactProvider(request).artifact(path, token),
     ).rejects.toMatchObject({ status: 503 });
   });
   it('times out network requests and never exposes the fetch exception', async () => {
@@ -256,7 +296,7 @@ describe('origin faults and trust boundaries', () => {
         );
       });
     await expect(
-      new GitHubArtifactProvider(request).snapshot(token),
+      new GitHubArtifactProvider(request).artifact(path, token),
     ).rejects.toMatchObject({ category: 'upstream_timeout' });
   });
   it('applies the timeout while reading a stalled body too', async () => {
@@ -273,31 +313,31 @@ describe('origin faults and trust boundaries', () => {
         }),
       );
     await expect(
-      new GitHubArtifactProvider(request).snapshot(token),
+      new GitHubArtifactProvider(request).artifact(path, token),
     ).rejects.toMatchObject({ category: 'upstream_timeout' });
   });
   it('fails closed without origin secrets before I/O', async () => {
     const request = vi.fn<typeof fetch>();
     await expect(
-      new GitHubArtifactProvider(request).snapshot(''),
+      new GitHubArtifactProvider(request).artifact(path, ''),
     ).rejects.toMatchObject({ status: 503 });
     expect(request).not.toHaveBeenCalled();
   });
 });
 
-it('enforces the whole-snapshot deadline across individually successful requests', async () => {
+it('enforces the per-artifact deadline across individually successful requests', async () => {
   const origin = upstream(await fixture());
   let now = 0;
   vi.spyOn(Date, 'now').mockImplementation(() => now);
   const provider = new GitHubArtifactProvider(async (input, init) => {
     const res = await origin.request(input, init);
-    now += 3100;
+    now += 5100;
     return res;
   });
-  await expect(provider.snapshot(token)).rejects.toMatchObject({
+  await expect(provider.artifact(path, token)).rejects.toMatchObject({
     category: 'upstream_timeout',
   });
-  expect(origin.calls).toHaveLength(5);
+  expect(origin.calls).toHaveLength(3);
 });
 
 it.each([
@@ -319,7 +359,12 @@ it.each([
       }
       return origin.request(input, init);
     });
-    await expect(provider.snapshot(token)).rejects.toMatchObject({
+    await expect(
+      provider.artifact(
+        path === 'manifest.json' ? 'generated/loon/rules/example.list' : path,
+        token,
+      ),
+    ).rejects.toMatchObject({
       status: 503,
     });
     expect(calls.some((url) => url.includes(`/contents/${path}?`))).toBe(false);
@@ -342,7 +387,7 @@ it.each([
     const tree = gitTree(data);
     if (fault === 'truncated') tree.truncated = true;
     if (fault === 'oversize')
-      tree.tree = Array.from({ length: 65 }, (_, i) => ({
+      tree.tree = Array.from({ length: MAX_TREE_ENTRIES + 1 }, (_, i) => ({
         path: `ignored-${i}`,
         mode: '100644',
         type: 'blob',
@@ -359,7 +404,9 @@ it.each([
     }
     return Response.json(tree);
   });
-  await expect(provider.snapshot(token)).rejects.toMatchObject({ status: 503 });
+  await expect(provider.artifact(path, token)).rejects.toMatchObject({
+    status: 503,
+  });
 });
 
 it('accepts both ordinary Git blob modes without following symlinks', async () => {
@@ -372,5 +419,7 @@ it('accepts both ordinary Git blob modes without following symlinks', async () =
     tree.tree[0]!.mode = '100755';
     return Response.json(tree);
   });
-  expect((await provider.snapshot(token)).files.size).toBe(4);
+  expect((await provider.artifact(path, token))?.bytes).toEqual(
+    data.bytes.get(path),
+  );
 });

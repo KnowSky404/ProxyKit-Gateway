@@ -3,24 +3,22 @@ import {
   MAX_FILE_BYTES,
   MAX_TREE_ENTRIES,
   MAX_UPSTREAM_JSON_BYTES,
-  SNAPSHOT_TIMEOUT_MS,
+  ARTIFACT_TIMEOUT_MS,
   UPSTREAM_TIMEOUT_MS,
 } from '../config/contract';
 import { GatewayError, requireValue } from '../http/errors';
 import { object, parseJson } from '../manifest/json';
 import { sha256, validateManifest } from '../manifest/validate';
+import type { Manifest } from '../manifest/validate';
 
 export interface Artifact {
+  path: string;
+  commit: string;
   bytes: Uint8Array<ArrayBuffer>;
   sha256: string;
 }
-export interface Snapshot {
-  commit: string;
-  sourceCommit: string;
-  files: ReadonlyMap<string, Artifact>;
-}
 export interface ArtifactProvider {
-  snapshot(token: string): Promise<Snapshot>;
+  artifact(path: string, token: string): Promise<Artifact | undefined>;
 }
 
 const API = 'https://api.github.com/repos/KnowSky404/ProxyKit-Private';
@@ -66,14 +64,19 @@ async function boundedBody(response: Response): Promise<string> {
 
 export class GitHubArtifactProvider implements ArtifactProvider {
   // Only verified bytes are shared; never share in-flight I/O between request contexts.
-  private cached?: Snapshot;
+  private cached?: {
+    commit: string;
+    manifest: Manifest;
+    tree: ReadonlyMap<string, Record<string, unknown>>;
+    artifact?: Artifact;
+  };
   private retryAt = 0;
 
   constructor(
     private readonly request: typeof fetch = fetch.bind(globalThis),
   ) {}
 
-  async snapshot(token: string): Promise<Snapshot> {
+  async artifact(path: string, token: string): Promise<Artifact | undefined> {
     if (
       typeof token !== 'string' ||
       !token.trim() ||
@@ -88,7 +91,7 @@ export class GitHubArtifactProvider implements ArtifactProvider {
         Math.ceil((this.retryAt - Date.now()) / 1000),
       );
     }
-    const deadline = Date.now() + SNAPSHOT_TIMEOUT_MS;
+    const deadline = Date.now() + ARTIFACT_TIMEOUT_MS;
     const api = async (endpoint: string): Promise<Record<string, unknown>> => {
       const remaining = deadline - Date.now();
       if (remaining <= 0) throw new GatewayError(503, 'upstream_timeout');
@@ -140,22 +143,10 @@ export class GitHubArtifactProvider implements ArtifactProvider {
           COMMIT.test(ref.sha),
       );
       const commit = ref.sha;
-      if (this.cached?.commit === commit) return this.cached;
-      // Discard the previous version before loading a new one; never backfill deleted paths.
-      this.cached = undefined;
-      const treeResponse = await api(`git/trees/${commit}?recursive=1`);
-      requireValue(
-        treeResponse.truncated === false &&
-          Array.isArray(treeResponse.tree) &&
-          treeResponse.tree.length <= MAX_TREE_ENTRIES,
-      );
-      const tree = new Map<string, Record<string, unknown>>();
-      for (const value of treeResponse.tree) {
-        const entry = object(value);
-        requireValue(typeof entry.path === 'string' && !tree.has(entry.path));
-        tree.set(entry.path, entry);
-      }
-      const read = async (path: string): Promise<Uint8Array<ArrayBuffer>> => {
+      const read = async (
+        path: string,
+        tree: ReadonlyMap<string, Record<string, unknown>>,
+      ): Promise<Uint8Array<ArrayBuffer>> => {
         // Contents API can silently dereference symlinks, so verify the pinned Git mode first.
         const entry = tree.get(path);
         requireValue(
@@ -187,29 +178,47 @@ export class GitHubArtifactProvider implements ArtifactProvider {
         requireValue(binary.length === obj.size && btoa(binary) === encoded);
         return Uint8Array.from(binary, (char) => char.charCodeAt(0));
       };
-      const manifest = validateManifest(
-        parseJson(
-          new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(
-            await read('manifest.json'),
-          ),
-        ),
-      );
-      const files = new Map<string, Artifact>();
-      for (const entry of manifest.files) {
-        const bytes = await read(entry.path);
+      let cached = this.cached;
+      if (cached?.commit !== commit) {
+        // Discard the previous version before loading a new one; never backfill deleted paths.
+        this.cached = undefined;
+        const treeResponse = await api(`git/trees/${commit}?recursive=1`);
         requireValue(
-          bytes.byteLength === entry.size &&
-            (await sha256(bytes)) === entry.sha256,
+          treeResponse.truncated === false &&
+            Array.isArray(treeResponse.tree) &&
+            treeResponse.tree.length <= MAX_TREE_ENTRIES,
         );
-        files.set(entry.path, { bytes, sha256: entry.sha256 });
+        const tree = new Map<string, Record<string, unknown>>();
+        for (const value of treeResponse.tree) {
+          const entry = object(value);
+          requireValue(typeof entry.path === 'string' && !tree.has(entry.path));
+          tree.set(entry.path, entry);
+        }
+        const manifest = validateManifest(
+          parseJson(
+            new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(
+              await read('manifest.json', tree),
+            ),
+          ),
+        );
+        cached = { commit, manifest, tree };
+        this.cached = cached;
       }
-      const verified = { commit, sourceCommit: manifest.sourceCommit, files };
-      this.cached = verified;
-      return verified;
+      const entry = cached.manifest.files.find((file) => file.path === path);
+      if (!entry) return;
+      if (cached.artifact?.path === path) return cached.artifact;
+      const bytes = await read(path, cached.tree);
+      requireValue(
+        bytes.byteLength === entry.size &&
+          (await sha256(bytes)) === entry.sha256,
+      );
+      const artifact = { path, commit, bytes, sha256: entry.sha256 };
+      cached.artifact = artifact;
+      return artifact;
     } catch (error) {
       this.cached = undefined;
       if (error instanceof GatewayError) throw error;
-      throw new GatewayError(503, 'snapshot_rejected');
+      throw new GatewayError(503, 'artifact_rejected');
     }
   }
 }

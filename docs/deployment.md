@@ -1,6 +1,6 @@
 # 配置与部署
 
-目标为 Workers Free，固定 Worker 名 `proxykit-gateway`。`cloudflare.config.ts` 是唯一部署配置：启用 workers.dev 和独立 URL 凭据，关闭预览 URL、invocation logs 和 traces，并保留 query 脱敏。不配置付费专用 CPU 上限；完整快照校验保持不变。免费套餐 CPU/请求额度仍须通过实际下载验证，不能把本地测试当成生产容量证明。
+目标为 Workers Free，固定 Worker 名 `proxykit-gateway`。`cloudflare.config.ts` 是唯一部署配置：启用 workers.dev 和独立 URL 凭据，关闭预览 URL、invocation logs 和 traces，并保留 query 脱敏。不配置付费专用 CPU 上限；保留固定版本、Manifest、目标文件mode/大小/摘要校验，按需只读目标产物。免费套餐 CPU/请求额度仍须通过实际下载验证，不能把本地测试当成生产容量证明。
 
 ## 身份与运行时 Secrets
 
@@ -9,6 +9,8 @@
 `GITHUB_READ_TOKEN` 使用仅限私人仓库 Contents: Read 的 fine-grained PAT（Metadata Read 为 GitHub 附带权限），设有效期；不要给设备或 Actions。`DEVICE_AUTH` 是完整压缩 JSON，包含非空 `devices` 和 `disabled_paths` 数组。两个 Secret 均不得超过 5000 UTF-8 字节。
 
 在私人终端把两个字符串字段组织到受保护的 JSON 文件，例如 `.cloudflare/private/runtime.json`，目录权限 700、文件权限 600。真实值不能出现在聊天、命令参数、公开 GitHub 记录、测试夹具或 Actions Artifact 中。避免会展开环境变量的 dotenv Secrets 文件。
+
+本次按需读取升级只需要发布代码，现有运行时 Secrets、设备 Token 和订阅地址可继续使用。冷读取固定4次上游调用；同版本换文件2次，同文件命中缓存1次，不再随规则组数增长。
 
 ## 设备授权
 
@@ -19,7 +21,7 @@ mkdir -p .cloudflare/private
 bun run device:new phone-header bearer > .cloudflare/private/phone.json
 ```
 
-生成结果包含一次显示的 Token 和 device 条目。将条目加入 `DEVICE_AUTH.devices`，把 Token 私下送到设备。`disabled_paths` 默认为空数组。不传路径时默认生成 `paths: ["*"]`，授权固定私人仓库内全部当前及未来发布的规则；它只覆盖现有 API 路由和完整验证后的 `dist` 产物，不开放任意 GitHub 文件。新增规则只需使用对应订阅路径，删除已发布产物后原地址返回 404，无需重新部署网关或修改授权。也可在命令末尾传入最多 32 个精确 API 路径，限制设备范围；不支持目录通配，不能混用 `*` 与精确路径。
+生成结果包含一次显示的 Token 和 device 条目。将条目加入 `DEVICE_AUTH.devices`，把 Token 私下送到设备。`disabled_paths` 默认为空数组。不传路径时默认生成 `paths: ["*"]`，授权固定私人仓库内全部当前及未来发布的规则；它只覆盖现有 API 路由和经逐文件校验的 `dist` 产物，不开放任意 GitHub 文件。新增规则只需使用对应订阅路径，删除已发布产物后原地址返回 404，无需重新部署网关或修改授权。也可在命令末尾传入最多 32 个精确 API 路径，限制设备范围；不支持目录通配，不能混用 `*` 与精确路径。
 
 已有设备不会自动扩大权限：要切换为仓库范围，将该设备的 `paths` 一次性改成 `["*"]`，保留 id、摘要、transport、enabled 和停用列表，并按下文上传、核验、100% 激活新代码和 Secrets。原 Token 与订阅地址不变；其后新增规则无需再次改授权。回滚到不支持仓库范围的旧代码前，须使用兼容的精确路径授权配置，同时保留最新撤销和停用状态。
 
@@ -71,8 +73,8 @@ bunx --no-install cf workers versions create --secrets-file .cloudflare/private/
 
 ## 部署后验证与边界
 
-在私人终端验证 health、未认证/错误凭据 401、权限不足 403、停用 410、撤销 401，以及全部允许路径的 GET/HEAD/304。下载字节只能在内存或私人临时目录处理；逐一核对完整快照 SHA、文件大小和 SHA-256、四类 MIME、`private,no-store` 与安全响应头。任何缓存命中或 304 都必须鉴权。不要将有意错误配置发布给真实设备来验证 403/410，可通过隔离的合成认证条目验证并在交付前撤销。
+在私人终端验证 health、未认证/错误凭据 401、权限不足 403、停用 410、撤销 401，以及全部允许路径的 GET/HEAD/304。下载字节只能在内存或私人临时目录处理；逐一核对绑定的 dist SHA、目标文件大小和 SHA-256、四类 MIME、`private,no-store` 与安全响应头。任何缓存命中或 304 都必须鉴权。不要将有意错误配置发布给真实设备来验证 403/410，可通过隔离的合成认证条目验证并在交付前撤销。
 
-503 用随机 requestId 关联固定错误类别；不打印原始异常、URL/query、Header、Token、正文、私人名称或 GitHub 响应。GitHub 404 可能是权限或发布状态问题，不能据此判断私人仓库不存在。不得回退公开 Raw URL、陈旧文件或跳过全量校验。平台资源超限须单独记录，不能声称免费套餐已通过最大规模或并发验证。
+503 用随机 requestId 关联固定错误类别；不打印原始异常、URL/query、Header、Token、正文、私人名称或 GitHub 响应。GitHub 404 可能是权限或发布状态问题，不能据此判断私人仓库不存在。不得回退公开 Raw URL、陈旧文件或跳过 Manifest 或目标文件校验。平台资源超限须单独记录，不能声称免费套餐已通过最大规模或并发验证。
 
 workers.dev 的实际可达性由客户端网络决定。真实 Loon/QX/sing-box 版本、移动/宽带运营商、DNS/TLS、定时更新及冷加载资源消耗须实测；本地或单个云端出口通过不代表中国大陆或真机验收通过。
